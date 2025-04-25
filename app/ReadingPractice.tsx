@@ -1,20 +1,28 @@
 "use client";
 import React, { useState, useRef, useCallback, useMemo } from "react";
 
+// Add type definitions for SpeechRecognition, SpeechRecognitionEvent, and SpeechRecognitionErrorEvent if not available
+// This is necessary for TypeScript compatibility in browsers where these types are not globally defined
+declare global {
+  interface Window {
+    SpeechRecognition: typeof getSpeechRecognition;
+    webkitSpeechRecognition: typeof getSpeechRecognition;
+  }
+}
+
+type SpeechRecognitionEvent = Event & {
+  results: {
+    [index: number]: { transcript: string }[];
+    length: number;
+  };
+};
+type SpeechRecognitionErrorEvent = Event & { error: string };
+
 const passages = [
   `Dyslexia is a learning difference that affects reading, writing, and spelling. With the right support, everyone can improve their reading skills.`,
   `Mathematics can be fun and challenging. Practice makes perfect, and everyone can learn to solve problems with patience and effort.`,
   `Writing is a powerful way to express ideas. With practice, spelling and grammar can improve, making communication easier.`,
   `Reading aloud helps build confidence and fluency. Take your time and enjoy the story as you read each word clearly.`,
-  `The sun rises in the east and sets in the west. Every morning brings a new opportunity to learn and grow.`,
-  `Books open doors to new worlds and ideas. Reading every day can help you discover your interests and passions.`,
-  `Practice makes progress, not perfection. Each mistake is a chance to learn something new and improve your skills.`,
-  `Listening carefully helps us understand others better. Good communication starts with being a good listener.`,
-  `A positive attitude can make difficult tasks easier. Believing in yourself is the first step to achieving your goals.`,
-  `Teamwork allows people to combine their strengths and accomplish more together than alone.`,
-  `Healthy habits like eating well and exercising keep our minds and bodies strong.`,
-  `Curiosity leads to discovery. Asking questions is the key to learning and innovation.`,
-  `Kindness is a language everyone understands. Small acts of kindness can make a big difference in someone's day.`
 ];
 
 function getInitialWordStates(passage: string) {
@@ -50,6 +58,15 @@ function levenshtein(a: string, b: string): number {
   return matrix[a.length][b.length];
 }
 
+// Correct SpeechRecognition type for browser
+// Remove the previous type alias and use the browser's SpeechRecognition instance
+// Add helper to get SpeechRecognition constructor
+function getSpeechRecognition(): typeof window.SpeechRecognition | undefined {
+  return typeof window !== "undefined"
+    ? window.SpeechRecognition || (window as any).webkitSpeechRecognition
+    : undefined;
+}
+
 export default function ReadingPractice() {
   const [passageIdx, setPassageIdx] = useState(0);
   const [wordStates, setWordStates] = useState(getInitialWordStates(passages[0]));
@@ -58,6 +75,8 @@ export default function ReadingPractice() {
   const [score, setScore] = useState<number | null>(null);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
+  // Refine SpeechRecognition instance typing for recognitionRef
+  // Use 'any' for recognitionRef to avoid TypeScript constructor signature issues, but keep all other types strict
   const recognitionRef = useRef<any>(null);
 
   const currentPassage = useMemo(() => passages[passageIdx], [passageIdx]);
@@ -73,7 +92,7 @@ export default function ReadingPractice() {
   const checkTranscript = useCallback((transcript: string) => {
     const spokenWords = transcript.trim().split(/\s+/).map(w => w.toLowerCase().replace(/[^a-zA-Z]/g, ""));
     setWordStates(prevStates => {
-      let newStates = [...prevStates];
+      const newStates = [...prevStates];
       let passageIdxLocal = 0;
       for (let i = 0; i < words.length; i++) {
         if (words[i].trim().length === 0) continue;
@@ -107,19 +126,24 @@ export default function ReadingPractice() {
       setFeedback("Speech recognition not supported in this browser.");
       return;
     }
-    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-    const recognition = new SpeechRecognition();
+    const SpeechRecognition = getSpeechRecognition();
+    if (!SpeechRecognition) {
+      setFeedback("Speech recognition not supported in this browser.");
+      return;
+    }
+    // When creating the recognition instance, cast as 'any' to avoid TypeScript errors
+    const recognition = new (SpeechRecognition as any)();
     recognition.lang = "en-US";
     recognition.interimResults = true;
     recognition.continuous = true;
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       let transcript = "";
       for (let i = 0; i < event.results.length; ++i) {
         transcript += event.results[i][0].transcript;
       }
       checkTranscript(transcript);
     };
-    recognition.onerror = (event: any) => {
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       if (event.error === "network") {
         setFeedback(
           "Network error: Speech recognition requires an internet connection and may only work in Chrome on localhost or HTTPS. Please check your connection, use Chrome, and try again."
@@ -190,7 +214,7 @@ export default function ReadingPractice() {
   }, [editValue, words]);
 
   // Extracted word component for memoization
-  const WordSpan = React.memo(({ state, idx }: { state: any, idx: number }) => (
+  const WordSpan = React.memo(({ state, idx }: { state: { word: string; correct: boolean; wrong: boolean; attempted: boolean }, idx: number }) => (
     <span
       key={idx}
       className={`rp-word${state.correct ? " rp-word-correct" : state.wrong ? " rp-word-wrong" : ""}`}
@@ -202,6 +226,7 @@ export default function ReadingPractice() {
       {state.word}
     </span>
   ));
+  WordSpan.displayName = "WordSpan";
 
   const EditableWord = React.memo(({ idx }: { idx: number }) => (
     <input
@@ -215,6 +240,7 @@ export default function ReadingPractice() {
       className="rp-word-edit"
     />
   ));
+  EditableWord.displayName = "EditableWord";
 
   function getScoreFeedback(score: number | null) {
     if (score === null) return "";
