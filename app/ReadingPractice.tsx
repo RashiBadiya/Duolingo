@@ -67,6 +67,17 @@ function getSpeechRecognition(): typeof window.SpeechRecognition | undefined {
     : undefined;
 }
 
+interface MinimalSpeechRecognition {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
 export default function ReadingPractice() {
   const [passageIdx, setPassageIdx] = useState(0);
   const [wordStates, setWordStates] = useState(getInitialWordStates(passages[0]));
@@ -75,9 +86,7 @@ export default function ReadingPractice() {
   const [score, setScore] = useState<number | null>(null);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
-  // Refine SpeechRecognition instance typing for recognitionRef
-  // Use 'any' for recognitionRef to avoid TypeScript constructor signature issues, but keep all other types strict
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<MinimalSpeechRecognition | null>(null);
 
   const currentPassage = useMemo(() => passages[passageIdx], [passageIdx]);
   const words = useMemo(() => currentPassage.split(/(\s+)/), [currentPassage]);
@@ -131,8 +140,7 @@ export default function ReadingPractice() {
       setFeedback("Speech recognition not supported in this browser.");
       return;
     }
-    // When creating the recognition instance, cast as 'any' to avoid TypeScript errors
-    const recognition = new (SpeechRecognition as any)();
+    const recognition = new (SpeechRecognition as any)() as MinimalSpeechRecognition;
     recognition.lang = "en-US";
     recognition.interimResults = true;
     recognition.continuous = true;
