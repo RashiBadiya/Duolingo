@@ -18,6 +18,32 @@ type SpeechRecognitionEvent = Event & {
 };
 type SpeechRecognitionErrorEvent = Event & { error: string };
 
+// Define a type for the browser SpeechRecognition constructor
+type BrowserSpeechRecognition = typeof window.SpeechRecognition;
+
+declare global {
+  interface Window {
+    SpeechRecognition: BrowserSpeechRecognition;
+    webkitSpeechRecognition: BrowserSpeechRecognition;
+  }
+}
+
+function getSpeechRecognition(): BrowserSpeechRecognition | undefined {
+  if (typeof window === "undefined") return undefined;
+  return window.SpeechRecognition || window.webkitSpeechRecognition;
+}
+
+interface MinimalSpeechRecognition {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
 const passages = [
   `Dyslexia is a learning difference that affects reading, writing, and spelling. With the right support, everyone can improve their reading skills.`,
   `Mathematics can be fun and challenging. Practice makes perfect, and everyone can learn to solve problems with patience and effort.`,
@@ -56,26 +82,6 @@ function levenshtein(a: string, b: string): number {
     }
   }
   return matrix[a.length][b.length];
-}
-
-// Correct SpeechRecognition type for browser
-// Remove the previous type alias and use the browser's SpeechRecognition instance
-// Add helper to get SpeechRecognition constructor
-function getSpeechRecognition(): typeof window.SpeechRecognition | undefined {
-  return typeof window !== "undefined"
-    ? window.SpeechRecognition || (window as any).webkitSpeechRecognition
-    : undefined;
-}
-
-interface MinimalSpeechRecognition {
-  lang: string;
-  interimResults: boolean;
-  continuous: boolean;
-  onresult: ((event: SpeechRecognitionEvent) => void) | null;
-  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
 }
 
 export default function ReadingPractice() {
@@ -135,12 +141,12 @@ export default function ReadingPractice() {
       setFeedback("Speech recognition not supported in this browser.");
       return;
     }
-    const SpeechRecognition = getSpeechRecognition();
-    if (!SpeechRecognition) {
+    const SpeechRecognitionCtor = getSpeechRecognition() as (new () => MinimalSpeechRecognition) | undefined;
+    if (!SpeechRecognitionCtor) {
       setFeedback("Speech recognition not supported in this browser.");
       return;
     }
-    const recognition = new (SpeechRecognition as any)() as MinimalSpeechRecognition;
+    const recognition: MinimalSpeechRecognition = new SpeechRecognitionCtor();
     recognition.lang = "en-US";
     recognition.interimResults = true;
     recognition.continuous = true;
