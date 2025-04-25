@@ -1,11 +1,20 @@
 "use client";
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useCallback, useMemo } from "react";
 
 const passages = [
   `Dyslexia is a learning difference that affects reading, writing, and spelling. With the right support, everyone can improve their reading skills.`,
   `Mathematics can be fun and challenging. Practice makes perfect, and everyone can learn to solve problems with patience and effort.`,
   `Writing is a powerful way to express ideas. With practice, spelling and grammar can improve, making communication easier.`,
-  `Reading aloud helps build confidence and fluency. Take your time and enjoy the story as you read each word clearly.`
+  `Reading aloud helps build confidence and fluency. Take your time and enjoy the story as you read each word clearly.`,
+  `The sun rises in the east and sets in the west. Every morning brings a new opportunity to learn and grow.`,
+  `Books open doors to new worlds and ideas. Reading every day can help you discover your interests and passions.`,
+  `Practice makes progress, not perfection. Each mistake is a chance to learn something new and improve your skills.`,
+  `Listening carefully helps us understand others better. Good communication starts with being a good listener.`,
+  `A positive attitude can make difficult tasks easier. Believing in yourself is the first step to achieving your goals.`,
+  `Teamwork allows people to combine their strengths and accomplish more together than alone.`,
+  `Healthy habits like eating well and exercising keep our minds and bodies strong.`,
+  `Curiosity leads to discovery. Asking questions is the key to learning and innovation.`,
+  `Kindness is a language everyone understands. Small acts of kindness can make a big difference in someone's day.`
 ];
 
 function getInitialWordStates(passage: string) {
@@ -21,19 +30,77 @@ function calculateScore(wordStates: { word: string; correct: boolean; wrong: boo
   return Math.round((correct / (correct + wrong)) * 100);
 }
 
+// Helper: Levenshtein distance for fuzzy word match
+function levenshtein(a: string, b: string): number {
+  const matrix = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j - 1] + 1
+        );
+      }
+    }
+  }
+  return matrix[a.length][b.length];
+}
+
 export default function ReadingPractice() {
   const [passageIdx, setPassageIdx] = useState(0);
   const [wordStates, setWordStates] = useState(getInitialWordStates(passages[0]));
   const [feedback, setFeedback] = useState("");
   const [listening, setListening] = useState(false);
   const [score, setScore] = useState<number | null>(null);
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editValue, setEditValue] = useState("");
   const recognitionRef = useRef<any>(null);
 
-  const currentPassage = passages[passageIdx];
-  const words = currentPassage.split(/(\s+)/);
+  const currentPassage = useMemo(() => passages[passageIdx], [passageIdx]);
+  const words = useMemo(() => currentPassage.split(/(\s+)/), [currentPassage]);
 
-  // Start speech recognition
-  const startListening = () => {
+  // Memoize missedWords for performance
+  const missedWords = useMemo(
+    () => wordStates.filter(w => w.wrong && w.attempted && w.word.trim().length > 0).map(w => w.word),
+    [wordStates]
+  );
+
+  // Check transcript against passage, positionally
+  const checkTranscript = useCallback((transcript: string) => {
+    const spokenWords = transcript.trim().split(/\s+/).map(w => w.toLowerCase().replace(/[^a-zA-Z]/g, ""));
+    setWordStates(prevStates => {
+      let newStates = [...prevStates];
+      let passageIdxLocal = 0;
+      for (let i = 0; i < words.length; i++) {
+        if (words[i].trim().length === 0) continue;
+        const cleanWord = words[i].toLowerCase().replace(/[^a-zA-Z]/g, "");
+        const spoken = spokenWords[passageIdxLocal];
+        if (spoken !== undefined) {
+          // Fuzzy match: allow Levenshtein distance <= 1
+          if (spoken === cleanWord || levenshtein(spoken, cleanWord) <= 1) {
+            newStates[i] = { ...newStates[i], correct: true, wrong: false, attempted: true };
+          } else {
+            newStates[i] = { ...newStates[i], correct: false, wrong: true, attempted: true };
+          }
+          passageIdxLocal++;
+        } else {
+          newStates[i] = { ...newStates[i], correct: false, wrong: false, attempted: false };
+        }
+      }
+      // Live scoring
+      const newScore = calculateScore(newStates);
+      setScore(newScore);
+      return newStates;
+    });
+    // Feedback can be updated live, but do not call stopListening here
+  }, [words]);
+
+  // Handlers
+  const startListening = useCallback(() => {
     setFeedback("");
     setScore(null);
     if (!('webkitSpeechRecognition' in window)) {
@@ -68,9 +135,9 @@ export default function ReadingPractice() {
     recognition.start();
     recognitionRef.current = recognition;
     setListening(true);
-  };
+  }, [checkTranscript]);
 
-  const stopListening = () => {
+  const stopListening = useCallback(() => {
     if (recognitionRef.current) {
       recognitionRef.current.stop();
       recognitionRef.current = null;
@@ -80,38 +147,9 @@ export default function ReadingPractice() {
     const newScore = calculateScore(wordStates);
     setScore(newScore);
     setFeedback(getScoreFeedback(newScore));
-  };
+  }, [wordStates]);
 
-  // Check transcript against passage, positionally
-  const checkTranscript = (transcript: string) => {
-    const spokenWords = transcript.trim().split(/\s+/).map(w => w.toLowerCase().replace(/[^a-zA-Z]/g, ""));
-    let newStates = [...wordStates];
-    let passageIdxLocal = 0;
-    for (let i = 0; i < words.length; i++) {
-      if (words[i].trim().length === 0) continue;
-      const cleanWord = words[i].toLowerCase().replace(/[^a-zA-Z]/g, "");
-      const spoken = spokenWords[passageIdxLocal];
-      if (spoken !== undefined) {
-        if (spoken === cleanWord) {
-          newStates[i] = { ...newStates[i], correct: true, wrong: false, attempted: true };
-        } else {
-          newStates[i] = { ...newStates[i], correct: false, wrong: true, attempted: true };
-        }
-        passageIdxLocal++;
-      } else {
-        newStates[i] = { ...newStates[i], correct: false, wrong: false, attempted: false };
-      }
-    }
-    setWordStates(newStates);
-    // Live scoring
-    const newScore = calculateScore(newStates);
-    setScore(newScore);
-    // Do NOT stop listening automatically; let user control it
-    // Feedback can be updated live, but do not call stopListening here
-  };
-
-  // Reset for another try
-  const reset = () => {
+  const reset = useCallback(() => {
     let nextIdx = passageIdx;
     while (nextIdx === passageIdx && passages.length > 1) {
       nextIdx = Math.floor(Math.random() * passages.length);
@@ -121,7 +159,62 @@ export default function ReadingPractice() {
     setFeedback("");
     setScore(null);
     stopListening();
-  };
+  }, [passageIdx, stopListening]);
+
+  const handleEditWord = useCallback((idx: number) => {
+    setEditingIdx(idx);
+    setEditValue(wordStates[idx].word.trim());
+  }, [wordStates]);
+
+  const handleSaveEdit = useCallback((idx: number) => {
+    setWordStates(prevStates => {
+      if (!prevStates[idx].wrong) {
+        setEditingIdx(null);
+        return prevStates;
+      }
+      const newStates = [...prevStates];
+      const cleanEdit = editValue.toLowerCase().replace(/[^a-zA-Z]/g, "");
+      const cleanTarget = words[idx].toLowerCase().replace(/[^a-zA-Z]/g, "");
+      if (cleanEdit === cleanTarget) {
+        newStates[idx] = { ...newStates[idx], correct: true, wrong: false, attempted: true, word: words[idx] };
+      } else {
+        newStates[idx] = { ...newStates[idx], correct: false, wrong: true, attempted: true, word: words[idx] };
+      }
+      // Update score and feedback
+      const newScore = calculateScore(newStates);
+      setScore(newScore);
+      setFeedback(getScoreFeedback(newScore));
+      setEditingIdx(null);
+      return newStates;
+    });
+  }, [editValue, words]);
+
+  // Extracted word component for memoization
+  const WordSpan = React.memo(({ state, idx }: { state: any, idx: number }) => (
+    <span
+      key={idx}
+      className={`rp-word${state.correct ? " rp-word-correct" : state.wrong ? " rp-word-wrong" : ""}`}
+      aria-label={state.word.trim()}
+      onClick={() => state.wrong ? handleEditWord(idx) : undefined}
+      style={state.wrong ? { cursor: "pointer", textDecoration: "underline dotted" } : {}}
+      title={state.wrong ? "Click to correct" : undefined}
+    >
+      {state.word}
+    </span>
+  ));
+
+  const EditableWord = React.memo(({ idx }: { idx: number }) => (
+    <input
+      key={idx}
+      value={editValue}
+      onChange={e => setEditValue(e.target.value)}
+      onBlur={() => handleSaveEdit(idx)}
+      onKeyDown={e => { if (e.key === "Enter") handleSaveEdit(idx); }}
+      autoFocus
+      style={{ width: Math.max(2, editValue.length) + "ch", margin: "0 2px", fontSize: "1em" }}
+      className="rp-word-edit"
+    />
+  ));
 
   function getScoreFeedback(score: number | null) {
     if (score === null) return "";
@@ -130,9 +223,6 @@ export default function ReadingPractice() {
     if (score >= 50) return "Good effort! Keep practicing to improve your accuracy.";
     return "Keep practicing. Try reading slowly and clearly.";
   }
-
-  // Find missed words for remediation (attempted and wrong)
-  const missedWords = wordStates.filter(w => w.wrong && w.attempted && w.word.trim().length > 0).map(w => w.word);
 
   return (
     <div className="rp-bg">
@@ -145,13 +235,11 @@ export default function ReadingPractice() {
         </div>
         <div className="rp-passage" aria-label="Passage to read">
           {wordStates.map((state, idx) => (
-            <span
-              key={idx}
-              className={`rp-word${state.correct ? " rp-word-correct" : state.wrong ? " rp-word-wrong" : ""}`}
-              aria-label={state.word.trim()}
-            >
-              {state.word}
-            </span>
+            editingIdx === idx ? (
+              <EditableWord idx={idx} key={idx} />
+            ) : (
+              <WordSpan state={state} idx={idx} key={idx} />
+            )
           ))}
         </div>
         <div className="rp-controls">
