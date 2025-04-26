@@ -92,6 +92,7 @@ export default function ReadingPractice() {
   const [score, setScore] = useState<number | null>(null);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [currentWordIdx, setCurrentWordIdx] = useState<number | null>(null);
   const recognitionRef = useRef<MinimalSpeechRecognition | null>(null);
 
   const currentPassage = useMemo(() => passages[passageIdx], [passageIdx]);
@@ -109,6 +110,7 @@ export default function ReadingPractice() {
     setWordStates(prevStates => {
       const newStates = [...prevStates];
       let passageIdxLocal = 0;
+      let lastMatchedIdx = null;
       for (let i = 0; i < words.length; i++) {
         if (words[i].trim().length === 0) continue;
         const cleanWord = words[i].toLowerCase().replace(/[^a-zA-Z]/g, "");
@@ -117,14 +119,20 @@ export default function ReadingPractice() {
           // Fuzzy match: allow Levenshtein distance <= 1
           if (spoken === cleanWord || levenshtein(spoken, cleanWord) <= 1) {
             newStates[i] = { ...newStates[i], correct: true, wrong: false, attempted: true };
+            lastMatchedIdx = i;
           } else {
             newStates[i] = { ...newStates[i], correct: false, wrong: true, attempted: true };
+            lastMatchedIdx = i;
           }
           passageIdxLocal++;
         } else {
           newStates[i] = { ...newStates[i], correct: false, wrong: false, attempted: false };
         }
       }
+      // Find the next word to read (skip whitespace)
+      let nextIdx = lastMatchedIdx === null ? 0 : lastMatchedIdx + 1;
+      while (nextIdx < words.length && words[nextIdx].trim().length === 0) nextIdx++;
+      setCurrentWordIdx(nextIdx < words.length ? nextIdx : null);
       // Live scoring
       const newScore = calculateScore(newStates);
       setScore(newScore);
@@ -231,10 +239,13 @@ export default function ReadingPractice() {
   const WordSpan = React.memo(({ state, idx }: { state: { word: string; correct: boolean; wrong: boolean; attempted: boolean }, idx: number }) => (
     <span
       key={idx}
-      className={`rp-word${state.correct ? " rp-word-correct" : state.wrong ? " rp-word-wrong" : ""}`}
+      className={`rp-word${state.correct ? " rp-word-correct" : state.wrong ? " rp-word-wrong" : ""}${currentWordIdx === idx ? " rp-word-next" : ""}`}
       aria-label={state.word.trim()}
       onClick={() => state.wrong ? handleEditWord(idx) : undefined}
-      style={state.wrong ? { cursor: "pointer", textDecoration: "underline dotted" } : {}}
+      style={{
+        ...(state.wrong ? { cursor: "pointer", textDecoration: "underline dotted" } : {}),
+        ...(currentWordIdx === idx ? { color: "#1976d2", fontWeight: "bold" } : {})
+      }}
       title={state.wrong ? "Click to correct" : undefined}
     >
       {state.word}
